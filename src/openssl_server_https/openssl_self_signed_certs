@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# After running the script, make sure to copy the ca_cert.crt file into your OS trust store and then run update-ca-certificates
+# Since this requires root access, the script does not do it for you.
+
+# Checking for installation of openssl
+
+if ! [ -x "$(command -v openssl)" ]; then
+    apt install libssl-dev
+    apt install openssl
+fi
+
+# Storing our keys and certificate in a folder called certs
+
+DIR_NAME=$(echo "$PWD" | rev | cut -d / -f 1 | rev)
+if ! [ "$DIR_NAME" = "certs" ]; then
+    if ! [ -d "certs" ]; then
+        mkdir certs
+        cd certs || exit
+    else 
+        cd certs
+    fi
+fi
+
+# Generating our private keys
+
+openssl ecparam -name prime256v1 -genkey -noout -outform PEM -out myCA.key
+
+# Generating our certificate
+
+openssl req -x509 -new -nodes -key myCA.key -sha256 -days 3600 -out myCA.pem
+
+# Creating SCR (Server Certificate Request)
+
+read -p "Enter name for your server file: " NAME
+openssl ecparam -name prime256v1 -genkey -noout -outform PEM -out $NAME.key
+openssl req -new -key $NAME.key -out $NAME.csr
+
+# Creating a ext file
+
+cat << EOF >> $NAME.ext
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost # Be sure to include the domain name here because Common Name is not so commonly honoured by itself
+IP.1 = 127.0.0.1 # Optionally, add an IP address (if the connection which you have planned requires it)
+EOF
+
+# Generating our final signed certificate
+openssl x509 -req -in $NAME.csr -CA myCA.pem -CAkey myCA.key -CAcreateserial -out $NAME.crt -days 3600 -sha256 -extfile $NAME.ext
